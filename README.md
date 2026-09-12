@@ -1,6 +1,6 @@
 # 🚀 Smart Task Management API
 
-A production-style, beginner-friendly REST API built with **Python**, **FastAPI**, **Pydantic v2**, **SQLAlchemy 2.0**, **MySQL**, **JWT Authentication**, and **Pytest**.
+A production-oriented REST API built with **Python**, **FastAPI**, **Pydantic v2**, **SQLAlchemy 2.0**, **PostgreSQL**, **Alembic**, **JWT Authentication**, and **Pytest**.
 
 This project demonstrates core backend concepts including **User Registration**, **Password Hashing (Bcrypt)**, **Stateless JWT Authentication**, and **Ownership-Based Authorization Controls**.
 
@@ -19,8 +19,8 @@ Modern applications require secure API endpoints where users can log in and mana
    - Users can only access, update, or delete tasks that **they own**.
    - Attempting to access another user's task returns HTTP `403 Forbidden`.
 3. **Task CRUD Operations**:
-   - `POST /tasks`: Create a new task (enforces status enum: `pending`, `in_progress`, `completed`).
-   - `GET /tasks`: Fetch only tasks belonging to the current logged-in user.
+  - `POST /tasks`: Create a new task with controlled status and priority values.
+  - `GET /tasks`: Fetch authorized tasks with pagination, filtering, sorting, and search.
    - `GET /tasks/{id}`: Fetch single task details with ownership verification.
    - `PUT /tasks/{id}`: Update task title, description, or status with ownership verification.
    - `DELETE /tasks/{id}`: Delete task with ownership verification (HTTP `204 No Content`).
@@ -37,8 +37,8 @@ Modern applications require secure API endpoints where users can log in and mana
 - **Language**: Python 3.10+
 - **Framework**: FastAPI 0.110+
 - **Data Validation & Schemas**: Pydantic v2 & `email-validator`
-- **Database & ORM**: MySQL / SQLite fallback with SQLAlchemy 2.0 ORM
-- **Database Driver**: PyMySQL & Cryptography
+- **Database & ORM**: PostgreSQL target with SQLAlchemy 2.0 ORM and Alembic migrations
+- **Database Driver**: Psycopg for PostgreSQL; PyMySQL remains available for explicit legacy compatibility
 - **Security & Tokens**: PyJWT & Bcrypt
 - **Testing**: Pytest & HTTPX TestClient
 
@@ -127,7 +127,7 @@ SERVICE LAYER (app/services/task_service.py)
   ▼
 SQLALCHEMY ORM (app/database/database.py & app/database/models.py)
   │
-  │ 6. Executes parameterized SQL query against MySQL / SQLite
+  │ 6. Executes parameterized SQL query against the explicitly configured database
   ▼
 PYDANTIC SERIALIZATION (app/schemas/task.py)
   │
@@ -143,10 +143,31 @@ CLIENT (HTTP 200 OK + JSON Payload)
 | Method | Endpoint | Description | Auth Required | Status Code |
 |---|---|---|---|---|
 | `GET` | `/` | Health check endpoint | No | `200 OK` |
+| `GET` | `/health/database` | Configured database connectivity check | No | `200 OK` / `503` |
+| `GET` | `/health/redis` | Optional Redis cache connectivity check | No | `200 OK` / `503` |
 | `POST` | `/auth/register` | Register a new user | No | `201 Created` |
 | `POST` | `/auth/login` | Login & receive JWT Bearer token | No | `200 OK` |
+| `POST` | `/auth/refresh` | Rotate a refresh token | No | `200 OK` / `401` |
+| `POST` | `/auth/logout` | Revoke a refresh token | No | `204 No Content` |
+| `GET` | `/users` | List users | Manager/Admin | `200 OK` / `403` |
+| `PATCH` | `/users/{id}/role` | Change a user role | Admin | `200 OK` / `403` / `404` |
+| `POST` | `/teams` | Create a team | Yes (Bearer) | `201 Created` |
+| `GET` | `/teams` | List accessible teams | Yes (Bearer) | `200 OK` |
+| `GET/PATCH/DELETE` | `/teams/{id}` | Access or manage a team | Scoped | `200` / `403` / `404` |
+| `GET/POST` | `/teams/{id}/members` | List or add team members | Scoped | `200` / `201` / `403` |
+| `DELETE` | `/teams/{id}/members/{user_id}` | Remove a team member | Team manager/owner/Admin | `204` / `403` |
+| `POST` | `/projects` | Create a project in a managed team | Team manager/owner/Admin | `201 Created` |
+| `GET` | `/projects` | List accessible projects | Yes (Bearer) | `200 OK` |
+| `GET/PATCH/DELETE` | `/projects/{id}` | Access or manage a project | Scoped | `200` / `403` / `404` |
+| `GET/POST` | `/projects/{id}/members` | List or add project members | Scoped | `200` / `201` / `403` |
+| `DELETE` | `/projects/{id}/members/{user_id}` | Remove a project member | Project/team manager/Admin | `204` / `403` |
+| `POST` | `/tasks/{id}/comments` | Create a task comment | Task scope | `201 Created` |
+| `GET` | `/tasks/{id}/comments` | List task comments | Task scope | `200 OK` / `403` |
+| `PATCH` | `/comments/{id}` | Edit a comment | Author/Manager/Admin | `200 OK` / `403` |
+| `DELETE` | `/comments/{id}` | Delete a comment | Author/Manager/Admin | `204` / `403` |
+| `GET` | `/tasks/{id}/activity` | View task activity history | Task scope | `200 OK` / `403` |
 | `POST` | `/tasks` | Create a new task | Yes (Bearer) | `201 Created` |
-| `GET` | `/tasks` | Get all tasks for current user | Yes (Bearer) | `200 OK` |
+| `GET` | `/tasks` | List authorized tasks with query filters | Yes (Bearer) | `200 OK` |
 | `GET` | `/tasks/{id}` | Get specific task by ID | Yes (Bearer) | `200 OK` / `403` / `404` |
 | `PUT` | `/tasks/{id}` | Update task details or status | Yes (Bearer) | `200 OK` / `403` / `404` |
 | `DELETE` | `/tasks/{id}` | Delete task | Yes (Bearer) | `204 No Content` / `403` / `404` |
@@ -190,12 +211,20 @@ Copy `.env.example` to `.env`:
 ```env
 PROJECT_NAME="Smart Task Management API"
 VERSION="1.0.0"
-DATABASE_URL="mysql+pymysql://root:password@localhost:3306/task_db"
-SECRET_KEY="super-secret-key-change-this-in-production-123456789"
+ENVIRONMENT="development"
+DATABASE_URL="postgresql+psycopg://task_user:password@localhost:5432/task_db"
+# Use a randomly generated secret with at least 32 characters.
+SECRET_KEY="replace-with-a-long-random-secret"
 ALGORITHM="HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 ```
-*(Note: If a local MySQL server is not running on port 3306, the application automatically falls back to SQLite `task_db.sqlite3` for zero-friction testing).*
+
+The application does not silently switch databases. Database configuration or connection errors stop startup and must be fixed explicitly.
+
+Tables are not created when the application module is imported. Apply the versioned schema explicitly:
+```bash
+alembic upgrade head
+```
 
 ### 5. Run API Development Server
 ```bash
@@ -218,6 +247,79 @@ pytest -v
 4. Click the **Authorize 🔓** button at the top right of Swagger UI.
 5. Paste your JWT access token and click **Authorize**.
 6. Now execute any protected `/tasks` endpoint directly from the browser!
+
+## 🧭 Database Migrations
+
+Alembic is the production schema-management mechanism. The application does not create tables during import or startup.
+
+Apply all migrations:
+```bash
+alembic upgrade head
+```
+
+Roll back the most recent migration in a safe development database:
+```bash
+alembic downgrade -1
+```
+
+Create a migration after changing SQLAlchemy models:
+```bash
+alembic revision --autogenerate -m "describe the schema change"
+```
+
+The normal workflow is to update models, generate and review the migration, apply it to an isolated database, run tests, and then apply it to the intended environment. PostgreSQL is the production target. SQLite is used only for isolated tests and local compatibility checks.
+
+### Existing SQLite Data
+
+`task_db.sqlite3` is preserved and is not migrated automatically. Before moving real data to PostgreSQL:
+
+1. Back up the SQLite file.
+2. Inspect and validate users and tasks.
+3. Create an empty PostgreSQL database and apply `alembic upgrade head`.
+4. Export users first, preserving IDs and password hashes.
+5. Map legacy `pending` task statuses to `todo` where appropriate.
+6. Import tasks after users so creator and assignee foreign keys remain valid.
+7. Validate row counts, uniqueness, timestamps, and ownership relationships.
+
+The repository SQLite artifact was inspected read-only and contains zero users and zero tasks.
+
+## 🧠 Redis Cache
+
+Redis is optional and is used only as a best-effort cache for user-scoped notification listings. PostgreSQL remains the source of truth. Configure `REDIS_URL` and `REDIS_CACHE_TTL_SECONDS` through the environment; leave `REDIS_URL` empty to disable caching.
+
+Cache keys include the authenticated user ID and unread filter. Entries expire after the configured TTL, defaulting to 30 seconds. Notification creation, read-state changes, and deletion invalidate both cached listing variants. If Redis is unavailable, requests bypass the cache and continue against the database without changing database configuration or behavior.
+
+## 📝 Comments and Activity
+
+Comments belong to tasks and inherit the task's project/team authorization. Authors may edit or delete their own comments. Managers and admins may moderate comments when they can access the task.
+
+The append-only activity log records task creation, updates, deletion, assignment and project changes, comment creation/update/deletion, and team/project membership changes. Each event stores its actor, action, entity type and ID, timestamp, optional task reference, and structured JSON metadata. There are no API endpoints for editing or deleting activity records.
+
+### Advanced Task Queries
+
+`GET /tasks` supports `limit`, `offset`, `status`, `priority`, `assignee_id`, `project_id`, `deadline_before`, `deadline_after`, `search`, `sort_by`, and `sort_order`. Results retain the existing JSON list response shape. Project-linked tasks are visible only to authorized project members, project owners, team managers, or admins.
+
+Task creation and updates support `project_id` and `assignee_id`. Project assignees must be project members, and assignment/reassignment requires project management scope, a global manager for unscoped tasks, or admin access.
+
+## 🔐 Role-Based Access Control
+
+Authentication identifies the current user through the existing JWT dependency. Authorization is handled separately by reusable role dependencies.
+
+| Role | Permissions |
+|---|---|
+| `MEMBER` | Create tasks; view, update, and delete tasks they create or are assigned to |
+| `MANAGER` | Member task permissions plus access to the current flat task scope and user listing |
+| `ADMIN` | Manager permissions plus role changes for users |
+
+Role values are stored as lowercase database values (`member`, `manager`, `admin`) while the application exposes uppercase role names through `UserRole`. Registration never accepts a role field, and only an authenticated admin can change a persisted role.
+
+Team and project authorization is scoped. Team owners and team members can view their teams; team managers and owners can manage them. Projects belong to one team, and only project members, project owners, team managers, or admins can view them. Project creation and membership changes require team or project management scope. A user must be a team member before joining a project.
+
+### Authentication Tokens
+
+`POST /auth/login` returns a short-lived access token and a longer-lived opaque refresh token. Access tokens include issuer, audience, type, issued-at, expiration, and unique ID claims. Refresh tokens are generated with secure randomness and only their SHA-256 digests are stored in the database.
+
+`POST /auth/refresh` rotates the refresh token. The presented token is immediately revoked. Reuse of a revoked token invalidates the user's active refresh sessions. `POST /auth/logout` revokes the supplied refresh token; access tokens remain valid only until their configured expiry.
 
 ---
 

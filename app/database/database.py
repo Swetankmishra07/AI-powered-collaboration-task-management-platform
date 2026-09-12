@@ -1,30 +1,25 @@
-import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import StaticPool
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
-
-def _get_engine():
+def _create_engine():
     """
-    Creates SQLAlchemy Engine with fallback to SQLite if MySQL is unavailable.
+    Creates the configured SQLAlchemy engine without changing databases.
     """
     database_url = settings.DATABASE_URL
     if database_url.startswith("sqlite"):
-        return create_engine(database_url, connect_args={"check_same_thread": False}, pool_pre_ping=True)
-    
-    try:
-        # Test connecting to MySQL
-        eng = create_engine(database_url, connect_args={}, pool_pre_ping=True)
-        with eng.connect() as conn:
-            pass
-        return eng
-    except Exception as e:
-        logger.warning(f"MySQL unavailable ({e}). Falling back to SQLite for local execution.")
-        fallback_url = "sqlite:///./task_db.sqlite3"
-        return create_engine(fallback_url, connect_args={"check_same_thread": False}, pool_pre_ping=True)
+        engine_options = {
+            "connect_args": {"check_same_thread": False},
+            "pool_pre_ping": True,
+        }
+        if database_url in {"sqlite://", "sqlite:///:memory:"}:
+            engine_options["poolclass"] = StaticPool
+        return create_engine(database_url, **engine_options)
 
-engine = _get_engine()
+    return create_engine(database_url, pool_pre_ping=True)
+
+engine = _create_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -37,5 +32,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

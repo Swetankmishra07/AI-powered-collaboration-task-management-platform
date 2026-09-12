@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.schemas.user import UserCreate, UserResponse
-from app.schemas.auth import LoginRequest, TokenResponse
+from app.schemas.auth import LoginRequest, RefreshTokenRequest, TokenResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -35,3 +35,25 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     POST /auth/login Endpoint
     """
     return AuthService.authenticate_user(login_data, db)
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Rotate refresh token",
+)
+def refresh(token_data: RefreshTokenRequest, db: Session = Depends(get_db)):
+    """Exchange a valid refresh token for a new access/refresh pair."""
+    return AuthService.refresh_tokens(token_data, db)
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke refresh token",
+)
+def logout(token_data: RefreshTokenRequest, db: Session = Depends(get_db)):
+    """Revoke the presented refresh token without exposing token state."""
+    AuthService.logout(token_data, db)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

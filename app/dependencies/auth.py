@@ -1,18 +1,19 @@
 import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.database.models import User
 from app.core.security import decode_access_token
 
-# OAuth2PasswordBearer scheme specifies the token endpoint URL for Swagger UI
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# The login endpoint accepts JSON, so HTTP Bearer accurately describes the API
+# without advertising an incompatible OAuth2 form flow in Swagger UI.
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db)
 ) -> User:
     """
@@ -34,8 +35,14 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    if credentials is None:
+        raise credentials_exception
+
     try:
+        token = credentials.credentials
         payload = decode_access_token(token)
+        if payload.get("typ") != "access":
+            raise credentials_exception
         user_id_str: str = payload.get("sub")
         if user_id_str is None:
             raise credentials_exception

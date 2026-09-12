@@ -6,16 +6,30 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class TaskStatus(str, Enum):
     """Controlled set of allowed task statuses."""
+    TODO = "todo"
+    BLOCKED = "blocked"
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+
+
+class TaskPriority(str, Enum):
+    """Controlled set of task priorities."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class TaskBase(BaseModel):
     """Base fields shared across Task schemas."""
     title: str = Field(..., min_length=1, max_length=100, examples=["Learn FastAPI"])
     description: Optional[str] = Field(None, examples=["Complete FastAPI CRUD tutorial"])
-    status: TaskStatus = Field(default=TaskStatus.PENDING, examples=["pending"])
+    status: TaskStatus = Field(default=TaskStatus.TODO, examples=["todo"])
+    priority: TaskPriority = Field(default=TaskPriority.LOW, examples=["low"])
+    deadline: Optional[datetime] = Field(None, examples=["2026-12-31T17:00:00Z"])
+    assignee_id: Optional[int] = Field(None, examples=[2])
+    project_id: Optional[int] = Field(None, examples=[10])
 
 
 class TaskCreate(TaskBase):
@@ -26,14 +40,21 @@ class TaskCreate(TaskBase):
 class TaskUpdate(BaseModel):
     """Schema for Task Update request. All fields are optional."""
     title: Optional[str] = Field(None, min_length=1, max_length=100, examples=["Learn Advanced FastAPI"])
-    description: Optional[str] = Field(None, examples=["Build production-style API"])
+    description: Optional[str] = Field(default=None, examples=["Build production-style API"])
     status: Optional[TaskStatus] = Field(None, examples=["completed"])
+    priority: Optional[TaskPriority] = Field(None, examples=["high"])
+    deadline: Optional[datetime] = Field(None, examples=["2026-12-31T17:00:00Z"])
+    assignee_id: Optional[int] = Field(None, examples=[2])
+    project_id: Optional[int] = Field(None, examples=[10])
 
 
 class TaskResponse(TaskBase):
     """Schema for Task API Response."""
     id: int
     user_id: int
+    creator_id: int
+    assignee_id: Optional[int]
+    project_id: Optional[int]
     created_at: datetime
     updated_at: datetime
 

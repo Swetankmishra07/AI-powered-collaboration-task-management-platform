@@ -1,11 +1,4 @@
-import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-
-
-def get_auth_headers(username: str, email: str):
+def get_auth_headers(client, username: str, email: str):
     client.post(
         "/auth/register",
         json={"username": username, "email": email, "password": "Password123"}
@@ -18,8 +11,8 @@ def get_auth_headers(username: str, email: str):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_create_task():
-    headers = get_auth_headers("t_user1", "t_user1@example.com")
+def test_create_task(client):
+    headers = get_auth_headers(client, "t_user1", "t_user1@example.com")
     response = client.post(
         "/tasks",
         json={
@@ -36,8 +29,8 @@ def test_create_task():
     assert "id" in data
 
 
-def test_get_user_tasks():
-    headers = get_auth_headers("t_user2", "t_user2@example.com")
+def test_get_user_tasks(client):
+    headers = get_auth_headers(client, "t_user2", "t_user2@example.com")
     client.post(
         "/tasks",
         json={"title": "Task A", "status": "pending"},
@@ -54,9 +47,9 @@ def test_get_user_tasks():
     assert len(data) >= 2
 
 
-def test_ownership_authorization_protection():
-    headers_owner = get_auth_headers("owner_user", "owner@example.com")
-    headers_stranger = get_auth_headers("stranger_user", "stranger@example.com")
+def test_ownership_authorization_protection(client):
+    headers_owner = get_auth_headers(client, "owner_user", "owner@example.com")
+    headers_stranger = get_auth_headers(client, "stranger_user", "stranger@example.com")
 
     # Owner creates task
     task_res = client.post(
@@ -79,8 +72,8 @@ def test_ownership_authorization_protection():
     assert del_res.status_code == 403
 
 
-def test_delete_task_success():
-    headers = get_auth_headers("del_user", "del@example.com")
+def test_delete_task_success(client):
+    headers = get_auth_headers(client, "del_user", "del@example.com")
     task_res = client.post(
         "/tasks",
         json={"title": "Task to be deleted", "status": "pending"},
@@ -95,3 +88,37 @@ def test_delete_task_success():
     # Verify task is deleted
     get_res = client.get(f"/tasks/{task_id}", headers=headers)
     assert get_res.status_code == 404
+
+
+def test_update_task_can_clear_description(client):
+    headers = get_auth_headers(client, "update_user", "update@example.com")
+    task_res = client.post(
+        "/tasks",
+        json={"title": "Task with description", "description": "Remove me"},
+        headers=headers,
+    )
+    task_id = task_res.json()["id"]
+
+    response = client.put(
+        f"/tasks/{task_id}",
+        json={"description": None},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["description"] is None
+
+
+def test_missing_task_returns_consistent_error(client):
+    headers = get_auth_headers(client, "missing_user", "missing@example.com")
+
+    response = client.get("/tasks/9999", headers=headers)
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "success": False,
+        "error": {
+            "code": "TASK_NOT_FOUND",
+            "message": "Task with ID 9999 not found.",
+        },
+    }
