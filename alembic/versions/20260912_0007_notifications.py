@@ -27,19 +27,68 @@ def upgrade() -> None:
         sa.Column("related_entity_type", sa.String(length=30), nullable=True),
         sa.Column("related_entity_id", sa.Integer(), nullable=True),
         sa.Column("task_id", sa.Integer(), nullable=True),
-        sa.Column("is_read", sa.Boolean(), server_default=sa.text("0"), nullable=False),
+        sa.Column(
+            "is_read",
+            sa.Boolean(),
+            server_default=sa.text("FALSE"),
+            nullable=False,
+        ),
         sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.ForeignKeyConstraint(["task_id"], ["tasks.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["task_id"],
+            ["tasks.id"],
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.id"],
+            ondelete="CASCADE",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_notifications_id", "notifications", ["id"], unique=False)
-    op.create_index("ix_notifications_user_id", "notifications", ["user_id"], unique=False)
-    op.create_index("ix_notifications_type", "notifications", ["type"], unique=False)
-    op.create_index("ix_notifications_task_id", "notifications", ["task_id"], unique=False)
-    op.create_index("ix_notifications_is_read", "notifications", ["is_read"], unique=False)
-    op.create_index("ix_notifications_created_at", "notifications", ["created_at"], unique=False)
+
+    op.create_index(
+        "ix_notifications_id",
+        "notifications",
+        ["id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notifications_user_id",
+        "notifications",
+        ["user_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notifications_type",
+        "notifications",
+        ["type"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notifications_task_id",
+        "notifications",
+        ["task_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notifications_is_read",
+        "notifications",
+        ["is_read"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notifications_created_at",
+        "notifications",
+        ["created_at"],
+        unique=False,
+    )
     op.create_index(
         "ix_notifications_user_read_created",
         "notifications",
@@ -49,11 +98,32 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_notifications_user_read_created", table_name="notifications")
-    op.drop_index("ix_notifications_created_at", table_name="notifications")
-    op.drop_index("ix_notifications_is_read", table_name="notifications")
-    op.drop_index("ix_notifications_task_id", table_name="notifications")
-    op.drop_index("ix_notifications_type", table_name="notifications")
-    op.drop_index("ix_notifications_user_id", table_name="notifications")
-    op.drop_index("ix_notifications_id", table_name="notifications")
+    op.drop_index(
+        "ix_notifications_user_read_created",
+        table_name="notifications",
+    )
+    op.drop_index(
+        "ix_notifications_created_at",
+        table_name="notifications",
+    )
+    op.drop_index(
+        "ix_notifications_is_read",
+        table_name="notifications",
+    )
+    op.drop_index(
+        "ix_notifications_task_id",
+        table_name="notifications",
+    )
+    op.drop_index(
+        "ix_notifications_type",
+        table_name="notifications",
+    )
+    op.drop_index(
+        "ix_notifications_user_id",
+        table_name="notifications",
+    )
+    op.drop_index(
+        "ix_notifications_id",
+        table_name="notifications",
+    )
     op.drop_table("notifications")
