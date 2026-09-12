@@ -110,12 +110,12 @@ class AuthService:
 
         if stored_token.revoked_at is not None:
             AuthService._revoke_user_tokens(stored_token.user_id, db)
-            raise AuthService._refresh_exception("Refresh token reuse detected")
+            raise AuthService._refresh_exception()
 
         if _as_utc(stored_token.expires_at) <= _utc_now():
             stored_token.revoked_at = _utc_now()
             db.commit()
-            raise AuthService._refresh_exception("Refresh token has expired")
+            raise AuthService._refresh_exception()
 
         new_refresh_token = generate_refresh_token()
         new_refresh_hash = hash_refresh_token(new_refresh_token)

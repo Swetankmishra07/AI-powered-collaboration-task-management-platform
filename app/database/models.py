@@ -39,6 +39,7 @@ class User(Base):
     comments = relationship("Comment", back_populates="author")
     activity_logs = relationship("ActivityLog", back_populates="actor")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    attachments = relationship("Attachment", back_populates="uploader")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
@@ -83,6 +84,7 @@ class Task(Base):
     project = relationship("Project", back_populates="tasks")
     comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLog", back_populates="task")
+    attachments = relationship("Attachment", back_populates="task", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Task(id={self.id}, title='{self.title}', status='{self.status}', user_id={self.user_id})>"
@@ -232,3 +234,38 @@ class Notification(Base):
     )
 
     user = relationship("User", back_populates="notifications")
+
+
+class BackgroundJob(Base):
+    """Durable work item processed outside an HTTP request transaction."""
+    __tablename__ = "background_jobs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    kind = Column(String(50), nullable=False, index=True)
+    payload = Column(JSON, nullable=False, default=dict, server_default="{}")
+    status = Column(String(20), nullable=False, default="pending", server_default="pending", index=True)
+    idempotency_key = Column(String(255), nullable=False, unique=True, index=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    available_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+
+
+class Attachment(Base):
+    """Metadata for a file stored by an external storage provider."""
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    original_filename = Column(String(255), nullable=False)
+    stored_filename = Column(String(255), nullable=False, unique=True)
+    content_type = Column(String(100), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    storage_provider = Column(String(50), nullable=False)
+    storage_key = Column(String(500), nullable=False, unique=True)
+    uploader_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    uploader = relationship("User", back_populates="attachments")
+    task = relationship("Task", back_populates="attachments")

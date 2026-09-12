@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database.models import Notification, User
 from app.core.redis import redis_cache
 from app.schemas.notification import NotificationResponse
+from app.services.realtime_service import queue_realtime_event
 
 
 def _cache_key(user_id: int, unread_only: bool) -> str:
@@ -38,6 +39,16 @@ def create_notification(
         task_id=task_id,
     )
     db.add(notification)
+    queue_realtime_event(db, {
+        "type": "notification",
+        "notification_type": notification_type,
+        "user_id": user_id,
+        "related_entity_type": related_entity_type,
+        "related_entity_id": related_entity_id,
+        "task_id": task_id,
+        "title": title,
+        "message": message,
+    })
     invalidate_notification_cache(user_id)
     return notification
 
@@ -74,6 +85,11 @@ class NotificationService:
             notification.is_read = True
             notification.read_at = datetime.now(timezone.utc)
             try:
+                queue_realtime_event(db, {
+                    "type": "notification.read",
+                    "user_id": user.id,
+                    "notification_id": notification.id,
+                })
                 db.commit()
                 db.refresh(notification)
             except Exception:
@@ -86,6 +102,10 @@ class NotificationService:
     def mark_all_read(user: User, db: Session) -> int:
         now = datetime.now(timezone.utc)
         try:
+            queue_realtime_event(db, {
+                "type": "notification.read_all",
+                "user_id": user.id,
+            })
             count = db.query(Notification).filter(
                 Notification.user_id == user.id,
                 Notification.is_read.is_(False),
@@ -104,6 +124,11 @@ class NotificationService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
         ensure_notification_owner(notification, user)
         try:
+            queue_realtime_event(db, {
+                "type": "notification.deleted",
+                "user_id": user.id,
+                "notification_id": notification.id,
+            })
             db.delete(notification)
             db.commit()
         except Exception:

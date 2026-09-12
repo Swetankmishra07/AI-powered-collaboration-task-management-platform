@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from app.database.models import Project, ProjectMember, Task, User
 from app.schemas.task import TaskCreate, TaskPriority, TaskStatus, TaskUpdate
 from app.services.activity_service import record_activity
+from app.services.background_job_service import BackgroundJobService
 from app.services.project_service import can_manage_project, can_view_project, get_project_or_404
+from app.services.realtime_service import queue_realtime_event
 
 
 def _ensure_project_access(project_id: Optional[int], user: User, db: Session) -> Optional[Project]:
@@ -94,6 +96,15 @@ class TaskService:
                     "task_id": new_task.id,
                 }] if new_task.assignee_id and new_task.assignee_id != current_user.id else None,
             )
+            BackgroundJobService.enqueue_deadline_reminder(db, new_task)
+            queue_realtime_event(db, {
+                "type": "task.created",
+                "task_id": new_task.id,
+                "project_id": new_task.project_id,
+                "actor_id": current_user.id,
+                "title": new_task.title,
+                "status": new_task.status,
+            })
             db.commit()
             db.refresh(new_task)
         except Exception:
@@ -239,9 +250,17 @@ class TaskService:
                     "related_entity_id": task.id,
                     "task_id": task.id,
                 })
+            BackgroundJobService.enqueue_deadline_reminder(db, task)
 
         try:
             if changes:
+                queue_realtime_event(db, {
+                    "type": "task.updated",
+                    "task_id": task.id,
+                    "project_id": task.project_id,
+                    "actor_id": current_user.id,
+                    "changes": changes,
+                })
                 record_activity(
                     db,
                     actor=current_user,
@@ -271,6 +290,12 @@ class TaskService:
                 entity_id=task.id,
                 task_id=task.id,
             )
+            queue_realtime_event(db, {
+                "type": "task.deleted",
+                "task_id": task.id,
+                "project_id": task.project_id,
+                "actor_id": current_user.id,
+            })
             db.delete(task)
             db.commit()
         except Exception:

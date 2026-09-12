@@ -237,6 +237,59 @@ Access the application at `http://127.0.0.1:8000`.
 pytest -v
 ```
 
+## 🐳 Docker Compose
+
+Docker Compose runs the API with PostgreSQL and Redis. It does not use or modify `task_db.sqlite3`.
+
+1. Copy `.env.example` to `.env` and replace the database password and `SECRET_KEY` placeholders with local values. Keep `.env` out of version control.
+2. Build and start the services:
+```bash
+docker compose up --build -d
+```
+3. Apply the versioned migrations explicitly from the API container:
+```bash
+docker compose exec api alembic upgrade head
+```
+4. Check service status at `http://127.0.0.1:8000/health/database` and open Swagger at `http://127.0.0.1:8000/docs`.
+5. Stop the services without deleting persistent PostgreSQL or attachment volumes:
+```bash
+docker compose down
+```
+
+The API image runs as a non-root user. PostgreSQL data uses the `postgres_data` volume, and local attachment content uses the `attachment_data` volume mounted at `/app/storage/attachments`. Redis remains the optional application cache dependency, while Compose provides it for the containerized environment. AI remains disabled unless explicitly configured through environment variables. Tests continue to run locally with their isolated SQLite fixture and do not require Docker, PostgreSQL, Redis, or an external AI provider.
+
+## 🚀 Deployment Readiness
+
+This repository provides a provider-neutral container and Compose baseline, not an automatic cloud deployment. Production values must be supplied through the environment; replace the `SECRET_KEY` and `POSTGRES_PASSWORD` placeholders and set `ENVIRONMENT=production` before startup. Configure `DATABASE_URL`, `REDIS_URL`, `CORS_ALLOWED_ORIGINS`, JWT settings, AI settings, background-job settings, and attachment settings explicitly for the target environment. Never commit `.env` or credentials.
+
+Build and run the image with the existing command:
+```bash
+docker build --file Dockerfile --tag smart-task-management-api:production .
+docker run --rm --env-file .env -p 8000:8000 smart-task-management-api:production
+```
+
+Run migrations as a deliberate release operation against PostgreSQL; application startup does not reset or create the schema:
+```bash
+docker run --rm --env-file .env smart-task-management-api:production alembic upgrade head
+```
+
+`/health/database` verifies configured database connectivity and is used by the image and Compose healthchecks. `/health/redis` reports optional Redis status. The in-process background worker is controlled by `BACKGROUND_JOBS_ENABLED`; run it only where one process owns the work, or use the existing architecture with an operational process model that prevents duplicate workers. WebSocket broadcasting is process-local, so multiple API instances need a shared messaging design in a future phase. Local attachment storage is suitable for development or a single persistent instance only; use a durable shared storage provider behind `StorageProvider` before scaling across instances. AI remains opt-in and requires provider configuration.
+
+GitHub Actions validates dependencies, the SQLite pytest suite, Alembic upgrade/downgrade, Compose syntax, and the Docker build on pushes and pull requests targeting `main`. It does not deploy or publish images.
+
+## ✅ Continuous Integration
+
+GitHub Actions runs on pushes to `main` and pull requests targeting `main`. The workflow installs `requirements.txt`, runs the SQLite pytest suite with CI-only environment values, upgrades and downgrades the Alembic schema on a temporary SQLite database, validates `docker compose config`, and builds the Docker image. It does not start PostgreSQL, Redis, or external AI services.
+
+The local equivalents are:
+```bash
+python -m pip install -r requirements.txt
+python -m pytest -q tests
+DATABASE_URL=sqlite:///ci_test.sqlite3 python -m alembic upgrade head
+docker compose config --quiet
+docker build --file Dockerfile --tag smart-task-management-api:ci .
+```
+
 ---
 
 ## 📚 Interactive Swagger UI Testing (`/docs`)
@@ -288,6 +341,42 @@ The repository SQLite artifact was inspected read-only and contains zero users a
 Redis is optional and is used only as a best-effort cache for user-scoped notification listings. PostgreSQL remains the source of truth. Configure `REDIS_URL` and `REDIS_CACHE_TTL_SECONDS` through the environment; leave `REDIS_URL` empty to disable caching.
 
 Cache keys include the authenticated user ID and unread filter. Entries expire after the configured TTL, defaulting to 30 seconds. Notification creation, read-state changes, and deletion invalidate both cached listing variants. If Redis is unavailable, requests bypass the cache and continue against the database without changing database configuration or behavior.
+
+## ⚙️ Background Jobs (Phase 10)
+
+The API includes a lightweight database-backed background-job layer for work that should run outside an HTTP request. Jobs are stored in `background_jobs`, include an idempotency key, and are claimed and processed with fresh SQLAlchemy sessions. Failures are logged and retried up to `BACKGROUND_JOBS_MAX_ATTEMPTS`; exhausted jobs are marked `failed` without crashing the API.
+
+The opt-in in-process worker handles notification and deadline-reminder jobs. It is disabled by default and can be enabled with `BACKGROUND_JOBS_ENABLED=true`. Polling, retry, and shutdown behavior are controlled by the `BACKGROUND_JOBS_*` settings in `.env.example`. Redis is not required. Existing assignment, activity, team, project, and comment notifications remain synchronous and immediately visible; deadline reminders are scheduled in the task transaction and deduplicated when processed. Report and AI job names are reserved hooks only and do not implement those features.
+
+Apply the Phase 10 schema before enabling the worker:
+```bash
+alembic upgrade head
+```
+
+## 🤖 AI Features (Phase 12)
+
+AI is optional and disabled unless `AI_ENABLED=true` and the provider settings in `.env.example` are configured. The application uses a small provider interface with an OpenAI-compatible HTTP adapter; tests use a fake provider and never make external calls. Missing configuration returns a controlled `503` response.
+
+Authenticated users can use:
+
+- `POST /ai/tasks/from-text` to turn natural language into a validated task created through the existing task service. Optional `project_id` and `assignee_id` overrides still pass the normal project, role, and assignment checks.
+- `POST /ai/tasks/{task_id}/summary` to summarize the authorized task, comments, status, priority, and activity.
+- `POST /ai/tasks/{task_id}/priority-suggestion` to receive a priority recommendation and explanation without changing the stored task.
+
+Task authorization runs before task data is assembled for the provider. AI requests are synchronous in this phase because no AI-result persistence model was added; the existing Phase 10 job architecture remains available for future persisted asynchronous results.
+
+## 📎 File Attachments (Phase 13)
+
+Attachments are authorized through the existing task access rules and stored as metadata in the `attachments` table. File content uses the `StorageProvider` interface with a local filesystem implementation for development and tests. The configured storage root is controlled by `ATTACHMENT_STORAGE_ROOT`; server-generated keys are used instead of client-provided paths, so path traversal is rejected.
+
+Available endpoints:
+
+- `POST /tasks/{task_id}/attachments` uploads a supported text, CSV, PDF, PNG, or JPEG file.
+- `GET /tasks/{task_id}/attachments` lists attachment metadata.
+- `GET /tasks/{task_id}/attachments/{attachment_id}` downloads attachment content.
+- `DELETE /tasks/{task_id}/attachments/{attachment_id}` deletes metadata and stored content.
+
+`ATTACHMENT_MAX_FILE_SIZE_BYTES` controls the upload limit. Filename, extension, and content type must agree. Storage is completed before metadata is committed; failed database writes trigger best-effort content cleanup, and successful metadata deletion removes the stored object. Object storage providers can be added behind the same interface without changing task authorization or API contracts.
 
 ## 📝 Comments and Activity
 

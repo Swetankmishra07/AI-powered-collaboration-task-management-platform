@@ -1,4 +1,7 @@
-from fastapi import Depends, FastAPI, HTTPException, status
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -6,15 +9,31 @@ from app.database import models  # Ensures models are registered with Base metad
 from app.database.database import get_db
 from app.core.config import settings
 from app.core.redis import redis_cache
-from app.routes import auth, comments, notifications, projects, tasks, teams, users
+from app.routes import ai, attachments, auth, comments, notifications, projects, tasks, teams, users, websocket
 from app.exceptions.handlers import register_exception_handlers
+from app.services.background_job_service import BackgroundJobRunner
+
+
+background_job_runner = BackgroundJobRunner()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if settings.BACKGROUND_JOBS_ENABLED:
+        background_job_runner.start()
+    try:
+        yield
+    finally:
+        if settings.BACKGROUND_JOBS_ENABLED:
+            background_job_runner.stop()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="A production-style REST API demonstrating Authentication, JWT, and Ownership-based Authorization.",
     version=settings.VERSION,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Register Exception Handlers
@@ -28,6 +47,28 @@ app.include_router(teams.router)
 app.include_router(projects.router)
 app.include_router(comments.router)
 app.include_router(notifications.router)
+app.include_router(websocket.router)
+app.include_router(ai.router)
+app.include_router(attachments.router)
+
+allowed_origins = [origin.strip() for origin in settings.CORS_ALLOWED_ORIGINS.split(",") if origin.strip()]
+if allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
 
 
 @app.get("/", tags=["Health Check"])

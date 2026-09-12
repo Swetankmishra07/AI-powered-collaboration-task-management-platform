@@ -23,6 +23,9 @@ engine = _create_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Register post-commit realtime delivery without retaining any Session objects.
+from app.services import realtime_service  # noqa: F401, E402
+
 
 def get_db():
     """

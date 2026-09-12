@@ -3,6 +3,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.database.models import ActivityLog, User
+from app.services.realtime_service import queue_realtime_event
 
 
 def record_activity(
@@ -26,6 +27,18 @@ def record_activity(
         metadata_json=metadata or {},
     )
     db.add(event)
+    project_id = metadata.get("project_id") if metadata else None
+    if entity_type == "project":
+        project_id = entity_id
+    queue_realtime_event(db, {
+        "type": "activity",
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "actor_id": actor.id if actor else None,
+        "task_id": task_id,
+        "project_id": project_id,
+    })
     if notifications:
         from app.services.notification_service import create_notification
 

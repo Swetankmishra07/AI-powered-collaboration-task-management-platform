@@ -7,6 +7,7 @@ from app.database.models import Comment, User
 from app.schemas.comment import CommentCreate, CommentUpdate
 from app.services.activity_service import record_activity
 from app.services.task_service import TaskService
+from app.services.realtime_service import queue_realtime_event
 
 
 def _get_comment(comment_id: int, db: Session) -> Comment:
@@ -46,6 +47,13 @@ class CommentService:
                     "task_id": task.id,
                 } for recipient_id in recipient_ids],
             )
+            queue_realtime_event(db, {
+                "type": "comment.created",
+                "task_id": task.id,
+                "comment_id": comment.id,
+                "actor_id": user.id,
+                "body": comment.body,
+            })
             db.commit()
             db.refresh(comment)
         except Exception:
@@ -75,6 +83,13 @@ class CommentService:
                 entity_id=comment.id,
                 task_id=comment.task_id,
             )
+            queue_realtime_event(db, {
+                "type": "comment.updated",
+                "task_id": comment.task_id,
+                "comment_id": comment.id,
+                "actor_id": user.id,
+                "body": comment.body,
+            })
             db.commit()
             db.refresh(comment)
         except Exception:
@@ -97,6 +112,12 @@ class CommentService:
                 entity_id=comment.id,
                 task_id=comment.task_id,
             )
+            queue_realtime_event(db, {
+                "type": "comment.deleted",
+                "task_id": comment.task_id,
+                "comment_id": comment.id,
+                "actor_id": user.id,
+            })
             db.delete(comment)
             db.commit()
         except Exception:
